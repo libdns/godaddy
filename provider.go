@@ -16,7 +16,7 @@ import (
 
 // Provider godaddy dns provider
 type Provider struct {
-	APIToken string
+	APIToken string `json:"api_token,omitempty"`
 }
 
 func getDomain(zone string) string {
