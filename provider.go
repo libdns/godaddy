@@ -1,3 +1,5 @@
+// Package godaddy implements methods for manipulating GoDaddy DNS records.
+// based on GoDaddy Domains API https://developer.godaddy.com/doc/endpoint/domains#/v1
 package godaddy
 
 import (
@@ -38,7 +40,7 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 
 	domain := getDomain(zone)
 
-	req, err := http.NewRequest("GET", p.getApiHost()+"/v1/domains/"+domain+"/records", nil)
+	req, err := http.NewRequest(http.MethodGet, p.getApiHost()+"/v1/domains/"+domain+"/records", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +114,7 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 			return nil, err
 		}
 
-		req, err := http.NewRequest("PUT", p.getApiHost()+"/v1/domains/"+getDomain(zone)+"/records/"+record.Type+"/"+getRecordName(zone, record.Name), bytes.NewBuffer(data))
+		req, err := http.NewRequest(http.MethodPut, p.getApiHost()+"/v1/domains/"+getDomain(zone)+"/records/"+record.Type+"/"+getRecordName(zone, record.Name), bytes.NewBuffer(data))
 		if err != nil {
 			return nil, err
 		}
@@ -159,62 +161,42 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 
 	var deletedRecords []libdns.Record
 
+	// accumulate records verified to actually exist in the zone
 	for _, record := range records {
-		for i, currentRecord := range currentRecords {
+		for _, currentRecord := range currentRecords {
 			if currentRecord.Type == record.Type && currentRecord.Name == getRecordName(zone, record.Name) {
-				currentRecords = append(currentRecords[:i], currentRecords[i+1:]...)
 				deletedRecords = append(deletedRecords, currentRecord)
 				break
 			}
 		}
 	}
 
-	type PostRecord struct {
-		Data string `json:"data"`
-		Name string `json:"name"`
-		TTL  int    `json:"ttl"`
-		Type string `json:"type"`
-	}
+	// loop through and delete verified records with individual API calls
+	for _, record := range deletedRecords {
+		req, err := http.NewRequest(http.MethodDelete, p.getApiHost()+"/v1/domains/"+getDomain(zone)+"/records/"+record.Type+"/"+record.Name, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Add("Authorization", "sso-key "+p.APIToken)
+		req.Header.Add("Content-Type", "application/json")
 
-	var data []PostRecord
+		client := http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
 
-	for _, record := range currentRecords {
-		data = append(data, PostRecord{
-			Data: record.Value,
-			Name: record.Name,
-			TTL:  int(record.TTL / time.Second),
-			Type: record.Type,
-		})
-	}
+		if resp.StatusCode != http.StatusNoContent {
+			bodyBytes, _ := ioutil.ReadAll(resp.Body)
+			return nil, fmt.Errorf("could not delete requested records: Domain: %s; Records: %v, Status: %v; Body: %s",
+				zone, deletedRecords, resp.StatusCode, string(bodyBytes))
+		}
 
-	dataByte, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("PUT", p.getApiHost()+"/v1/domains/"+getDomain(zone)+"/records", bytes.NewBuffer(dataByte))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Add("Authorization", "sso-key "+p.APIToken)
-	req.Header.Add("Content-Type", "application/json")
-
-	client := http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-		return nil, fmt.Errorf("could not delete records: Domain: %s; Records: %v, Status: %v; Body: %s",
-			zone, currentRecords, resp.StatusCode, string(bodyBytes))
-	}
-
-	_, err = ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+		_, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return deletedRecords, nil
