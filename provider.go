@@ -103,11 +103,13 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 
 		if record.TTL < time.Duration(600)*time.Second {
 			record.TTL = time.Duration(600) * time.Second
+			log.Printf(">>>DEBUG: record.TTL was forcefully set to 600 seconds\n")
 		}
 
 		data, err := json.Marshal([]PostRecord{
 			{
 				Data: record.Value,
+				Ttl:  3600, // DEBUG
 			},
 		})
 		if err != nil {
