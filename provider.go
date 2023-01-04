@@ -99,6 +99,7 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 
 		type PostRecord struct {
 			Data string `json:"data"`
+			TTL  int    `json:"ttl"`
 		}
 
 		if record.TTL < time.Duration(600)*time.Second {
@@ -108,6 +109,7 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 		data, err := json.Marshal([]PostRecord{
 			{
 				Data: record.Value,
+				TTL:  int(record.TTL / time.Second),
 			},
 		})
 		if err != nil {
