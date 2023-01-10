@@ -93,7 +93,7 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 
 		// if no records returned, we've attempted to read beyond the final page
 		if len(resultObj) == 0 {
-			morePages = false // don't read any more pages
+			morePages = false // don't read any more pages; still return accumulated results
 			break
 		}
 
@@ -109,7 +109,7 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 
 		// if results returned were less than the max page size, then this was the final page
 		if len(resultObj) < RECORDPAGEMAX {
-			morePages = false // don't read any more pages
+			morePages = false // don't read any more pages; still return accumulated results
 			break
 		}
 	}
