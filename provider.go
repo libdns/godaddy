@@ -16,6 +16,11 @@ import (
 	"github.com/libdns/libdns"
 )
 
+const (
+	// RECORDPAGEMAX is the maximum number of records that can be returned per API call/
+	RECORDPAGEMAX = 500
+)
+
 // Provider godaddy dns provider
 type Provider struct {
 	APIToken string `json:"api_token,omitempty"`
@@ -37,32 +42,8 @@ func (p *Provider) getApiHost() string {
 func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record, error) {
 	log.Println("GetRecords", zone)
 	client := http.Client{}
-
 	domain := getDomain(zone)
-
-	req, err := http.NewRequest(http.MethodGet, p.getApiHost()+"/v1/domains/"+domain+"/records", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Add("Authorization", "sso-key "+p.APIToken)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-		return nil, fmt.Errorf("could not get records: Domain: %s; Status: %v; Body: %s",
-			domain, resp.StatusCode, string(bodyBytes))
-	}
-
-	result, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
+	var records []libdns.Record
 	resultObj := []struct {
 		Type  string `json:"type"`
 		Name  string `json:"name"`
@@ -70,20 +51,67 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 		TTL   int    `json:"ttl"`
 	}{}
 
-	err = json.Unmarshal(result, &resultObj)
-	if err != nil {
-		return nil, err
-	}
+	// retrieve pages of up to 500 records each; continue incrementing the page counter
+	// until the record count drops below the max 500 (final page)
+	morePages := true
+	for page := 1; morePages; page++ {
+		url := p.getApiHost() + "/v1/domains/" + domain + "/records?offset=" + fmt.Sprint(page) + "&limit=" + fmt.Sprint(RECORDPAGEMAX)
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Add("Authorization", "sso-key "+p.APIToken)
+		req.Header.Set("Accept", "application/json")
 
-	var records []libdns.Record
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
 
-	for _, record := range resultObj {
-		records = append(records, libdns.Record{
-			Type:  record.Type,
-			Name:  record.Name,
-			Value: record.Value,
-			TTL:   time.Duration(record.TTL) * time.Second,
-		})
+		// successful page retrieval returns code 200; attempting a page beyond the final sometimes returns code 422 UnprocessableEntity
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnprocessableEntity {
+			bodyBytes, _ := ioutil.ReadAll(resp.Body)
+			return nil, fmt.Errorf("could not get records: Domain: %s; Status: %v; Body: %s",
+				domain, resp.StatusCode, string(bodyBytes))
+		}
+
+		if resp.StatusCode == http.StatusUnprocessableEntity {
+			morePages = false // don't read any more pages; still return accumulated results
+			break
+		}
+
+		result, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		err = json.Unmarshal(result, &resultObj)
+		if err != nil {
+			return nil, err
+		}
+
+		// if no records returned, we've attempted to read beyond the final page
+		if len(resultObj) == 0 {
+			morePages = false // don't read any more pages; still return accumulated results
+			break
+		}
+
+		// accumulate all records retrieved in the current page
+		for _, record := range resultObj {
+			records = append(records, libdns.Record{
+				Type:  record.Type,
+				Name:  record.Name,
+				Value: record.Value,
+				TTL:   time.Duration(record.TTL) * time.Second,
+			})
+		}
+
+		// if results returned were less than the max page size, then this was the final page
+		if len(resultObj) < RECORDPAGEMAX {
+			morePages = false // don't read any more pages; still return accumulated results
+			break
+		}
 	}
 
 	return records, nil
