@@ -34,6 +34,16 @@ func getRecordName(zone, name string) string {
 	return strings.TrimSuffix(strings.TrimSuffix(name, zone), ".")
 }
 
+// authHeader returns the Authorization header value.
+// A token in KEY:SECRET form is a Classic Developer Key (sso-key);
+// anything else is treated as a Personal Access Token (Bearer).
+func (p *Provider) authHeader() string {
+	if strings.Contains(p.APIToken, ":") {
+		return "sso-key " + p.APIToken
+	}
+	return "Bearer " + p.APIToken
+}
+
 func (p *Provider) getApiHost() string {
 	return "https://api.godaddy.com"
 }
@@ -60,7 +70,7 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Add("Authorization", "sso-key "+p.APIToken)
+		req.Header.Add("Authorization", p.authHeader())
 		req.Header.Set("Accept", "application/json")
 
 		resp, err := client.Do(req)
@@ -149,7 +159,7 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Add("Authorization", "sso-key "+p.APIToken)
+		req.Header.Add("Authorization", p.authHeader())
 		req.Header.Add("Content-Type", "application/json")
 
 		resp, err := client.Do(req)
@@ -211,7 +221,7 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Add("Authorization", "sso-key "+p.APIToken)
+		req.Header.Add("Authorization", p.authHeader())
 		req.Header.Add("Content-Type", "application/json")
 
 		client := http.Client{}
